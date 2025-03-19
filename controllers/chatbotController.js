@@ -2,6 +2,11 @@ const db = require('../db');
 const { Configuration, OpenAIApi } = require('openai');
 
 // Initialize OpenAI
+if (!process.env.OPENAI_API_KEY) {
+  console.error("Error: OPENAI_API_KEY is not set.");
+  process.exit(1);
+}
+
 const configuration = new Configuration({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -69,8 +74,15 @@ async function generateSQLQuery(messages, callback) {
       messages: [{ role: "user", content: prompt }]
     });
 
-    console.log("OpenAI Response:", openAIResponse.data.choices[0].message.content);
-    const response = JSON.parse(openAIResponse.data.choices[0].message.content);
+    const responseText = openAIResponse.data.choices[0].message.content;
+    console.log("OpenAI Response:", responseText);
+
+    // Extract JSON from response text
+    const jsonStartIndex = responseText.indexOf('{');
+    const jsonEndIndex = responseText.lastIndexOf('}') + 1;
+    const jsonResponse = responseText.substring(jsonStartIndex, jsonEndIndex);
+
+    const response = JSON.parse(jsonResponse);
 
     if (response.missingFields) {
       return callback(null, null, response.message);
@@ -141,7 +153,21 @@ async function handleChatbotRequest(req, res) {
         }
       });
     } else {
-      return res.json({ botReply: { role: "assistant", content: "I couldn't find that name in the database. Please try again." } });
+      // Handle non-database-related prompts using OpenAI
+      const userMessage = messages[messages.length - 1].content;
+      openai.createChatCompletion({
+        model: "gpt-4",
+        messages: [
+          { role: "system", content: "You are a helpful assistant." },
+          { role: "user", content: userMessage }
+        ]
+      }).then(openAIResponse => {
+        const botReply = openAIResponse.data.choices[0].message.content;
+        return res.json({ botReply: { role: "assistant", content: botReply } });
+      }).catch(error => {
+        console.error("Error generating response:", error);
+        return res.json({ botReply: { role: "assistant", content: "An error occurred while processing your request." } });
+      });
     }
   });
 }
