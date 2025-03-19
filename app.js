@@ -12,6 +12,7 @@ app.use(express.json()); // To parse JSON bodies
 const db = require('./db');
 
 const todoController = require('./controllers/todoController');
+const { handleChatbotRequest } = require('./controllers/chatbotController');
 
 // Route to get todos
 app.get('/todos', todoController.getTodos);
@@ -24,6 +25,9 @@ app.put('/todos/:id', todoController.updateTodo);
 
 // Route to delete a todo by ID
 app.delete('/todos/:id', todoController.deleteTodo);
+
+// API Route to Handle OpenAI Chatbot Request
+app.post('/api/chatbot', handleChatbotRequest);
 
 // Start the server
 app.listen(port, () => {
