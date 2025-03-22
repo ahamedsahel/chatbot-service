@@ -32,11 +32,11 @@ function getAllNames(callback) {
 }
 
 // Generate SQL Query using OpenAI
-async function generateSQLQuery(messages, callback) {
+async function generateSQLQuery(messages, names, callback) {
   const userQuery = messages[messages.length - 1].content;
 
   const prompt = `
-  Convert the following user question into a secure SQL query:
+  Convert the following user question into secure SQL queries for each name:
   "${userQuery}"
   
   Database Schema:
@@ -44,20 +44,19 @@ async function generateSQLQuery(messages, callback) {
   - Ensure to use parameterized queries.
 
   Step 1: Determine whether the query is a **fetch request (SELECT)** or **insert request (INSERT)**.
-  Step 2: If it's a **fetch request**, generate the correct **SELECT** query based on the available attributes.
+  Step 2: If it's a **fetch request**, generate the correct **SELECT** query based on the available attributes for each name.
   Step 3: If it's an **insert request**, check for missing fields.
   Step 4: If any required field is missing, return a message asking the user to provide them.
   
   **Example Outputs:**
 
   **For Fetch Request (SELECT)**
-  User: "What is John's age?"
+  User: "What are the ages of John and Jane?"
   Output:
-  { "query": "SELECT age FROM tudo WHERE name = ?", "params": ["John"] }
-
-  User: "Give me details of Hashim."
-  Output:
-  { "query": "SELECT * FROM tudo WHERE name = ?", "params": ["Hashim"] }
+  [
+    { "query": "SELECT age FROM tudo WHERE name = ?", "params": ["John"] },
+    { "query": "SELECT age FROM tudo WHERE name = ?", "params": ["Jane"] }
+  ]
 
   **For Insert Request (INSERT)**
   User: "Add John with age 25 and date 2024-02-26."
@@ -78,16 +77,17 @@ async function generateSQLQuery(messages, callback) {
     console.log("OpenAI Response:", responseText);
 
     // Extract JSON from response text
-    const jsonStartIndex = responseText.indexOf('{');
-    const jsonEndIndex = responseText.lastIndexOf('}') + 1;
+    const jsonStartIndex = responseText.indexOf('[');
+    const jsonEndIndex = responseText.lastIndexOf(']') + 1;
     const jsonResponse = responseText.substring(jsonStartIndex, jsonEndIndex);
 
     const response = JSON.parse(jsonResponse);
 
-    if (response.missingFields) {
-      return callback(null, null, response.message);
+    if (response.some(r => r.missingFields)) {
+      const missingMessage = response.find(r => r.missingFields).message;
+      return callback(null, null, missingMessage);
     } else {
-      return callback(response.query, response.params, null);
+      return callback(response, null);
     }
   } catch (error) {
     console.error("Error generating SQL:", error);
@@ -120,33 +120,44 @@ async function handleChatbotRequest(req, res) {
     const name = extractName(messages, names);
 
     if (name) {
-      generateSQLQuery(messages, (sqlQuery, params, missingMessage) => {
+      generateSQLQuery(messages, names, (sqlQueries, params, missingMessage) => {
         if (missingMessage) {
           return res.json({ botReply: { role: "assistant", content: missingMessage } });
         }
 
-        if (sqlQuery) {
-          executeQuery(sqlQuery, params, async (result) => {
-            if (result.length > 0) {
-              // For SELECT Query
-              const key = Object.keys(result[0])[0]; // Get column name
-              const value = result[0][key];         // Get column value
-              const data = `${name}'s ${key} is ${value}.`;
+        if (sqlQueries) {
+          const results = [];
+          sqlQueries.forEach((queryObj, index) => {
+            executeQuery(queryObj.query, queryObj.params, async (result) => {
+              if (result.length > 0) {
+                // For SELECT Query
+                const key = Object.keys(result[0])[0]; // Get column name
+                const value = result[0][key];         // Get column value
+                const data = `${queryObj.params[0]}'s ${key} is ${value}.`;
 
-              // Rephrase response using OpenAI
-              const openAIResponse = await openai.createChatCompletion({
-                model: "gpt-4",
-                messages: [
-                  { role: "system", content: "You are a helpful assistant." },
-                  { role: "user", content: `Rephrase this: ${data}` }
-                ]
-              });
+                // Rephrase response using OpenAI
+                const openAIResponse = await openai.createChatCompletion({
+                  model: "gpt-4",
+                  messages: [
+                    { role: "system", content: "You are a helpful assistant." },
+                    { role: "user", content: `Rephrase this: ${data}` }
+                  ]
+                });
 
-              const botReply = openAIResponse.data.choices[0].message.content;
-              return res.json({ botReply: { role: "assistant", content: botReply } });
-            } else {
-              return res.json({ botReply: { role: "assistant", content: "Data successfully added or no results found." } });
-            }
+                const botReply = openAIResponse.data.choices[0].message.content;
+                console.log("OpenAI Response:", botReply);
+                results.push(botReply);
+
+                if (results.length === sqlQueries.length) {
+                  return res.json({ botReply: { role: "assistant", content: results.join(' ') } });
+                }
+              } else {
+                results.push("Data successfully added or no results found.");
+                if (results.length === sqlQueries.length) {
+                  return res.json({ botReply: { role: "assistant", content: results.join(' ') } });
+                }
+              }
+            });
           });
         } else {
           return res.json({ botReply: { role: "assistant", content: "Invalid request." } });
