@@ -1,5 +1,7 @@
 const db = require('../db');
 const { Configuration, OpenAIApi } = require('openai');
+const express = require('express');
+const router = express.Router();
 
 // Initialize OpenAI
 if (!process.env.OPENAI_API_KEY) {
@@ -107,10 +109,15 @@ function executeQuery(query, params, callback) {
   });
 }
 
+// Define a route to check if the API is working
+router.get("/", (req, res) => {
+  res.json({ message: "Chatbot API is working!" });
+});
+
 // API Route to Handle OpenAI Chatbot Request
 async function handleChatbotRequest(req, res) {
   console.log("Received request body:", req.body);
-
+  res.send("Chatbot backend is running!");
   const { messages } = req.body;
   if (!messages || messages.length === 0) {
     return res.status(400).json({ error: 'Messages are required' });
@@ -184,5 +191,6 @@ async function handleChatbotRequest(req, res) {
 }
 
 module.exports = {
-  handleChatbotRequest
+  handleChatbotRequest,
+  router
 };
