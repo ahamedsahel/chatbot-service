@@ -117,7 +117,6 @@ router.get("/", (req, res) => {
 // API Route to Handle OpenAI Chatbot Request
 async function handleChatbotRequest(req, res) {
   console.log("Received request body:", req.body);
-  res.send("Chatbot backend is running!");
   const { messages } = req.body;
   if (!messages || messages.length === 0) {
     return res.status(400).json({ error: 'Messages are required' });
